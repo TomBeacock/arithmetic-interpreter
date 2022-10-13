@@ -7,8 +7,8 @@ data Token = Number Int | Op Operator | ParenOpen | ParenClose deriving(Eq)
 data Operator = Plus | Minus | Times | Divide | Modulo | Absolute deriving(Eq)
 
 data AST = Literal Int | BinOp BinOperator AST AST | UnOp UnOperator AST
-data BinOperator = Add | Sub | Mul | Div | Mod
-data UnOperator = Neg | Abs
+data BinOperator = Add | Sub | Mul | Div | Mod deriving (Eq)
+data UnOperator = Neg | Abs deriving (Eq)
 
 -- Main
 main = do
@@ -70,41 +70,53 @@ toOperator s = error ("Invalid symbol: " ++ s)
 -- term := int | (expr) | -term | abs term
 
 parse :: [Token] -> AST
-parse = fst . parseExpr
+parse ts = case parseExpr ts of
+    Nothing -> error "Failed to parse expression"
+    Just (ast, _) -> ast
 
-parseExpr :: [Token] -> (AST, [Token])
-parseExpr ts = node
-    where
-        (leftOperand, remaining) = parseMExpr ts
-        node
-            | null remaining = (leftOperand, [])
-            | head remaining == Op Plus = (BinOp Add leftOperand rightOperand, remaining')
-            | head remaining == Op Minus = (BinOp Sub leftOperand rightOperand, remaining')
-            | otherwise = (leftOperand, remaining)
-                where
-                    (rightOperand, remaining') = parseExpr $ tail remaining
+parseExpr :: [Token] -> Maybe (AST, [Token])
+parseExpr [] = Nothing
+parseExpr ts = case parseMExpr ts of
+    Nothing -> error "Failed to parse expression"
+    Just (mexpr, ts') -> case parseBinOp ts' of
+        Nothing -> Just (mexpr, [])
+        Just op -> case parseExpr $ tail ts' of
+            Nothing -> error "Failed to parse expression"
+            Just (expr, ts'') -> Just (BinOp op mexpr expr, ts'')
 
-parseMExpr :: [Token] -> (AST, [Token])
-parseMExpr ts = node
-    where
-        (leftOperand, remaining) = parseTerm ts
-        node
-            | null remaining = (leftOperand, [])
-            | head remaining == Op Times = (BinOp Mul leftOperand rightOperand, remaining')
-            | head remaining == Op Divide = (BinOp Div leftOperand rightOperand, remaining')
-            | head remaining == Op Modulo = (BinOp Mod leftOperand rightOperand, remaining')
-            | otherwise = (leftOperand, remaining)
-                where
-                    (rightOperand, remaining') = parseMExpr $ tail remaining
+parseMExpr :: [Token] -> Maybe (AST, [Token])
+parseMExpr [] = Nothing
+parseMExpr ts = case parseTerm ts of
+    Nothing -> error "Failed to parse expression"
+    Just (term, ts') -> case parseBinOp ts' of
+        Nothing -> Just (term, [])
+        Just op
+            | op `elem` [Mul, Div, Mod] -> case parseMExpr $ tail ts' of
+                Nothing -> error "Failed to parse expression"
+                Just (mexpr, ts'') -> Just (BinOp op term mexpr, ts'')
+            | otherwise -> Just (term, ts')
 
-parseTerm :: [Token] -> (AST, [Token])
-parseTerm (Number n:ts) = (Literal n, ts)
-parseTerm (Op Minus:ts) = (UnOp Neg operand, remaining)
-    where (operand, remaining) = parseTerm ts
-parseTerm (Op Absolute:ts) = (UnOp Abs operand, remaining)
-    where (operand, remaining) = parseTerm ts
-parseTerm (ParenOpen:ts) = (expr, tail remaining)
-    where (expr, remaining) = parseExpr ts
+parseBinOp :: [Token] -> Maybe BinOperator
+parseBinOp ts = case ts of
+    (Op Plus:ts') -> Just Add
+    (Op Minus:ts') -> Just Sub
+    (Op Times:ts') -> Just Mul
+    (Op Divide:ts') -> Just Div
+    (Op Modulo:ts') -> Just Mod
+    _ -> Nothing
+
+parseTerm :: [Token] -> Maybe (AST, [Token])
+parseTerm (Number n:ts) = Just (Literal n, ts)
+parseTerm (Op Minus:ts) = case parseTerm ts of
+    Nothing -> error "Failed to parse term"
+    Just (term, ts') -> Just (UnOp Neg term, ts')
+parseTerm (Op Absolute:ts) = case parseTerm ts of
+    Nothing -> error "Failed to parse term"
+    Just (term, ts') -> Just (UnOp Abs term, ts')
+parseTerm (ParenOpen:ts) = case parseExpr ts of
+    Nothing -> error "Failed to parse term"
+    Just (expr, ts') -> Just (expr, tail ts')
+
 parseTerm (t:_) = error ("Unexpected token " ++ show t)
 parseTerm _ = error "Expected token, list was empty"
 
