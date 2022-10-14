@@ -65,9 +65,10 @@ toOperator s = error ("Invalid symbol: " ++ s)
 
 -- Parsing
 
--- expr := mexpr | mexpr + expr | mexpr - expr
--- mexpr := term | term * mexpr | term / mexpr | term % expr
--- term := int | (expr) | -term | abs term
+-- expr := factor | factor + factor | factor - factor
+-- factor := unary | unary * unary | unary / unary | unary % unary
+-- unary := term | -term | abs term
+-- term := int | (expr)
 
 parse :: [Token] -> AST
 parse ts = case parseExpr ts of
@@ -76,49 +77,51 @@ parse ts = case parseExpr ts of
 
 parseExpr :: [Token] -> Maybe (AST, [Token])
 parseExpr [] = Nothing
-parseExpr ts = case parseMExpr ts of
-    Nothing -> error "Failed to parse expression"
-    Just (mexpr, ts') -> case parseBinOp ts' of
-        Nothing -> Just (mexpr, [])
-        Just op -> case parseExpr $ tail ts' of
-            Nothing -> error "Failed to parse expression"
-            Just (expr, ts'') -> Just (BinOp op mexpr expr, ts'')
+parseExpr ts = case parseFactor ts of
+    Nothing -> Nothing
+    Just (left, ts') -> loop ts' left
+    where
+        loop (Op Plus:ts) left = case parseFactor ts of
+            Nothing -> Nothing
+            Just (right, ts') -> loop ts' (BinOp Add left right)
+        loop (Op Minus:ts) left = case parseFactor ts of
+            Nothing -> Nothing
+            Just (right, ts') -> loop ts' (BinOp Sub left right)
+        loop ts left = Just (left, ts)
 
-parseMExpr :: [Token] -> Maybe (AST, [Token])
-parseMExpr [] = Nothing
-parseMExpr ts = case parseTerm ts of
-    Nothing -> error "Failed to parse expression"
-    Just (term, ts') -> case parseBinOp ts' of
-        Nothing -> Just (term, [])
-        Just op
-            | op `elem` [Mul, Div, Mod] -> case parseMExpr $ tail ts' of
-                Nothing -> error "Failed to parse expression"
-                Just (mexpr, ts'') -> Just (BinOp op term mexpr, ts'')
-            | otherwise -> Just (term, ts')
+parseFactor :: [Token] -> Maybe (AST, [Token])
+parseFactor [] = Nothing
+parseFactor ts = case parseUnary ts of
+    Nothing -> Nothing
+    Just (left, ts') -> loop ts' left
+    where
+        loop (Op Times:ts) left = case parseUnary ts of
+            Nothing -> Nothing
+            Just (right, ts') -> loop ts' (BinOp Mul left right)
+        loop (Op Divide:ts) left = case parseUnary ts of
+            Nothing -> Nothing
+            Just (right, ts') -> loop ts' (BinOp Div left right)
+        loop (Op Modulo:ts) left = case parseUnary ts of
+            Nothing -> Nothing
+            Just (right, ts') -> loop ts' (BinOp Mod left right)
+        loop ts left = Just (left, ts)
 
-parseBinOp :: [Token] -> Maybe BinOperator
-parseBinOp ts = case ts of
-    (Op Plus:ts') -> Just Add
-    (Op Minus:ts') -> Just Sub
-    (Op Times:ts') -> Just Mul
-    (Op Divide:ts') -> Just Div
-    (Op Modulo:ts') -> Just Mod
-    _ -> Nothing
+parseUnary :: [Token] -> Maybe (AST, [Token])
+parseUnary [] = Nothing
+parseUnary (Op Minus:ts) = case parseUnary ts of
+    Nothing -> Nothing
+    Just (unary, ts') -> Just (UnOp Neg unary, ts')
+parseUnary (Op Absolute:ts) = case parseUnary ts of
+    Nothing -> Nothing
+    Just (unary, ts') -> Just (UnOp Abs unary, ts')
+parseUnary ts = parseTerm ts
 
 parseTerm :: [Token] -> Maybe (AST, [Token])
 parseTerm (Number n:ts) = Just (Literal n, ts)
-parseTerm (Op Minus:ts) = case parseTerm ts of
-    Nothing -> error "Failed to parse term"
-    Just (term, ts') -> Just (UnOp Neg term, ts')
-parseTerm (Op Absolute:ts) = case parseTerm ts of
-    Nothing -> error "Failed to parse term"
-    Just (term, ts') -> Just (UnOp Abs term, ts')
 parseTerm (ParenOpen:ts) = case parseExpr ts of
-    Nothing -> error "Failed to parse term"
+    Nothing -> Nothing
     Just (expr, ts') -> Just (expr, tail ts')
-
-parseTerm (t:_) = error ("Unexpected token " ++ show t)
-parseTerm _ = error "Expected token, list was empty"
+parseTerm _ = Nothing
 
 -- Evaluate
 evaluate :: AST -> Int
